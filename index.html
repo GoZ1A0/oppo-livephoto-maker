@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OPPO 实况照片生成器</title>
+    <style>
+        :root {
+            --bg: #0f0f0f;
+            --surface: #1a1a1a;
+            --surface2: #252525;
+            --primary: #4CAF50;
+            --primary-hover: #45a049;
+            --danger: #e74c3c;
+            --warning: #f39c12;
+            --text: #e0e0e0;
+            --text2: #a0a0a0;
+            --border: #333;
+            --radius: 12px;
+            --shadow: 0 4px 24px rgba(0,0,0,0.3);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+
+        .app {
+            width: 100%;
+            max-width: 720px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 24px 0 8px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #4CAF50, #81C784);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 6px;
+        }
+        .header .subtitle {
+            font-size: 14px;
+            color: var(--text2);
+        }
+
+        /* Cards */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+        }
+
+        .card-header {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card-header .icon { font-size: 20px; }
+
+        /* Switch Toggle */
+        .mode-switch {
+            display: flex;
+            background: var(--surface2);
+            border-radius: 8px;
+            padding: 3px;
+            gap: 3px;
+        }
+        .mode-switch button {
+            flex: 1;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text2);
+            background: transparent;
+            transition: all 0.2s;
+        }
+        .mode-switch button.active {
+            background: var(--primary);
+            color: #fff;
+        }
+
+        /* Drop Zone */
+        .dropzone {
+            border: 2px dashed #444;
+            border-radius: var(--radius);
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            min-height: 160px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .dropzone:hover, .dropzone.drag-over {
+            border-color: var(--primary);
+            background: rgba(76, 175, 80, 0.05);
+        }
+        .dropzone .dz-icon {
+            font-size: 48px;
+            opacity: 0.5;
+        }
+        .dropzone .dz-text {
+            font-size: 14px;
+            color: var(--text2);
+        }
+        .dropzone .dz-hint {
+            font-size: 12px;
+            color: #666;
+        }
+        .dropzone input { display: none; }
+
+        /* File List */
+        .file-list {
+            max-height: 260px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: var(--surface2);
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .file-item .fi-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+        .file-item .fi-icon.gif { background: #e74c3c22; }
+        .file-item .fi-icon.mp4 { background: #3498db22; }
+        .file-item .fi-icon.jpg { background: #f39c1222; }
+        .file-item .fi-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .file-item .fi-name {
+            font-size: 13px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .file-item .fi-meta {
+            font-size: 11px;
+            color: var(--text2);
+        }
+        .file-item .fi-status {
+            flex-shrink: 0;
+        }
+        .file-item .fi-remove {
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: transparent;
+            color: var(--text2);
+            cursor: pointer;
+            border-radius: 50%;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        .file-item .fi-remove:hover {
+            background: #e74c3c22;
+            color: var(--danger);
+        }
+
+        /* Status badge */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .badge.pending { background: #666; color: #ccc; }
+        .badge.processing { background: #3498db33; color: #5dade2; }
+        .badge.completed { background: #4CAF5033; color: #4CAF50; }
+        .badge.failed { background: #e74c3c33; color: #e74c3c; }
+        .badge.skipped { background: #888; color: #aaa; }
+
+        /* Options */
+        .options-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .opt-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .opt-group label {
+            font-size: 12px;
+            color: var(--text2);
+            font-weight: 500;
+        }
+        .opt-group input, .opt-group select {
+            padding: 10px 12px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 14px;
+            outline: none;
+            transition: border 0.2s;
+        }
+        .opt-group input:focus, .opt-group select:focus {
+            border-color: var(--primary);
+        }
+
+        /* Progress */
+        .progress-section {
+            display: none;
+        }
+        .progress-section.visible {
+            display: block;
+        }
+        .total-progress {
+            margin-bottom: 12px;
+        }
+        .total-progress .tp-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-bottom: 6px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--surface2);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), #81C784);
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+        .progress-bar .fill.error {
+            background: linear-gradient(90deg, var(--danger), #e74c3c);
+        }
+        .item-progress-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .ip-item {
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+        }
+        .ip-item .ip-name {
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ip-item .ip-status {
+            font-weight: 500;
+            flex-shrink: 0;
+        }
+
+        /* Buttons */
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            justify-content: center;
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: #fff;
+            flex: 2;
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: var(--primary-hover);
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+            flex: 1;
+        }
+        .btn-outline:hover:not(:disabled) {
+            background: var(--surface2);
+        }
+        .btn-success {
+            background: #2ecc71;
+            color: #fff;
+            flex: 1;
+        }
+        .btn-success:hover:not(:disabled) {
+            background: #27ae60;
+        }
+        .btn-danger {
+            background: transparent;
+            border: 1px solid #e74c3c44;
+            color: var(--danger);
+            flex: 0;
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+
+        /* Stats */
+        .stats {
+            display: none;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+        .stats.visible { display: grid; }
+        .stat-item {
+            background: var(--surface2);
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+        }
+        .stat-item .value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+        .stat-item .label {
+            font-size: 11px;
+            color: var(--text2);
+            margin-top: 2px;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 12px;
+            font-size: 12px;
+            color: #555;
+        }
+        .footer a { color: var(--primary); text-decoration: none; }
+
+        @media (max-width: 500px) {
+            .options-grid { grid-template-columns: 1fr; }
+            .stats { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <div class="header">
+            <h1>📱 OPPO 实况照片生成器</h1>
+            <p class="subtitle">GIF / MP4 → OPPO Live Photo (.jpg) | 批量处理</p>
+        </div>
+
+        <!-- Mode Switch -->
+        <div class="card">
+            <div class="mode-switch">
+                <button id="modeBatch" class="active" onclick="switchMode('batch')">📦 批量处理</button>
+                <button id="modeSingle" onclick="switchMode('single')">📄 单个处理</button>
+            </div>
+        </div>
+
+        <!-- File Input Card -->
+        <div class="card">
+            <div class="card-header">
+                <span class="icon">📁</span>
+                <span id="fileInputTitle">拖拽文件到此处，或点击选择</span>
+            </div>
+            <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+                <input type="file" id="fileInput" multiple accept=".gif,.mp4,.jpg,.jpeg">
+                <span class="dz-icon">📂</span>
+                <span class="dz-text" id="dzText">拖拽 GIF / MP4 文件到此处</span>
+                <span class="dz-hint">支持 .gif / .mp4 / .jpg 文件 | 批量选择</span>
+            </div>
+            <div class="file-list" id="fileList"></div>
+        </div>
+
+        <!-- Options Card -->
+        <div class="card" id="optionsCard">
+            <div class="card-header">
+                <span class="icon">⚙️</span>
+                转换选项
+            </div>
+            <div class="options-grid">
+                <div class="opt-group">
+                    <label>FPS（GIF 转换用）</label>
+                    <input type="number" id="optFps" value="10" min="1" max="60" step="1">
+                </div>
+                <div class="opt-group">
+                    <label>画质 (CRF, 越小越好)</label>
+                    <input type="number" id="optQuality" value="23" min="0" max="51" step="1">
+                </div>
+                <div class="opt-group">
+                    <label>最大宽度（px, -1=自动）</label>
+                    <input type="number" id="optWidth" value="-1" min="-1" max="7680">
+                </div>
+                <div class="opt-group">
+                    <label>最大高度（px, -1=自动）</label>
+                    <input type="number" id="optHeight" value="-1" min="-1" max="7680">
+                </div>
+            </div>
+        </div>
+
+        <!-- Progress Card -->
+        <div class="card progress-section" id="progressCard">
+            <div class="card-header">
+                <span class="icon">📊</span>
+                处理进度
+            </div>
+            <div class="total-progress">
+                <div class="tp-header">
+                    <span id="totalProgressText">准备中...</span>
+                    <span id="totalProgressPct">0%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="fill" id="totalProgressBar" style="width: 0%"></div>
+                </div>
+            </div>
+            <div class="item-progress-list" id="itemProgressList"></div>
+        </div>
+
+        <!-- Buttons -->
+        <div class="btn-row" id="actionButtons">
+            <button class="btn btn-primary" id="btnStart" onclick="startConversion()" disabled>
+                🚀 开始批量转换
+            </button>
+            <button class="btn btn-outline" id="btnClear" onclick="clearFiles()">
+                🗑️ 清空列表
+            </button>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats" id="statsCard">
+            <div class="stat-item">
+                <div class="value" id="statCompleted">0</div>
+                <div class="label">✅ 完成</div>
+            </div>
+            <div class="stat-item">
+                <div class="value" id="statFailed">0</div>
+                <div class="label">❌ 失败</div>
+            </div>
+            <div class="stat-item">
+                <div class="value" id="statProcessing">0</div>
+                <div class="label">⏳ 处理中</div>
+            </div>
+            <div class="stat-item">
+                <div class="value" id="statPending">0</div>
+                <div class="label">📋 等待中</div>
+            </div>
+        </div>
+
+        <!-- Download -->
+        <div class="btn-row" id="downloadButtons" style="display:none;">
+            <button class="btn btn-success" id="btnDownload" onclick="downloadAll()">
+                💾 下载全部结果
+            </button>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            OPPO Live Photo Maker | 
+            <a href="#" onclick="alert('支持格式: GIF, MP4 → OPPO 实况照片\n使用 FFmpeg.wasm + OPPO格式解析\n完全在浏览器本地运行，无需上传')">关于</a>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/oppo-parser.js"></script>
+    <script src="js/mp4-generator.js"></script>
+    <script src="js/converter.js"></script>
+    <script src="js/batch-processor.js"></script>
+
+    <script>
+        // === App State ===
+        let appMode = 'batch'; // 'single' | 'batch'
+        let allFiles = []; // Raw File[] objects
+        const batch = new BatchProcessor();
+
+        // === Mode Switch ===
+        function switchMode(mode) {
+            appMode = mode;
+            document.getElementById('modeBatch').classList.toggle('active', mode === 'batch');
+            document.getElementById('modeSingle').classList.toggle('active', mode === 'single');
+            
+            document.getElementById('fileInputTitle').textContent = 
+                mode === 'batch' ? '拖拽文件到此处，或点击选择' : '选择单个 GIF 或 MP4 文件';
+            document.getElementById('dzText').textContent = 
+                mode === 'batch' ? '拖拽 GIF / MP4 文件到此处' : '拖拽 GIF 或 MP4 文件到此处';
+            
+            document.getElementById('btnStart').textContent = 
+                mode === 'batch' ? '🚀 开始批量转换' : '🚀 开始转换';
+            
+            clearFiles();
+        }
+
+        // === File Drop Zone ===
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('drag-over');
+        });
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('drag-over');
+        });
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('drag-over');
+            handleFiles(e.dataTransfer.files);
+        });
+        fileInput.addEventListener('change', () => {
+            handleFiles(fileInput.files);
+            fileInput.value = '';
+        });
+
+        function handleFiles(files) {
+            if (appMode === 'single') {
+                const validFiles = Array.from(files).filter(f => {
+                    const ext = f.name.split('.').pop().toLowerCase();
+                    return ext === 'gif' || ext === 'mp4' || ext === 'jpg' || ext === 'jpeg';
+                });
+                if (validFiles.length > 0) {
+                    allFiles = validFiles.slice(0, 2); // Max 2: video + optional cover
+                }
+            } else {
+                const validFiles = Array.from(files).filter(f => {
+                    const ext = f.name.split('.').pop().toLowerCase();
+                    return ext === 'gif' || ext === 'mp4' || ext === 'jpg' || ext === 'jpeg';
+                });
+                allFiles = [...allFiles, ...validFiles];
+            }
+            updateFileList();
+        }
+
+        function updateFileList() {
+            const list = document.getElementById('fileList');
+            const btnStart = document.getElementById('btnStart');
+
+            if (allFiles.length === 0) {
+                list.innerHTML = '';
+                btnStart.disabled = true;
+                return;
+            }
+
+            list.innerHTML = allFiles.map((file, i) => {
+                const ext = file.name.split('.').pop().toLowerCase();
+                const iconClass = ext === 'gif' ? 'gif' : ext === 'mp4' ? 'mp4' : 'jpg';
+                const iconEmoji = ext === 'gif' ? '🎞️' : ext === 'mp4' ? '🎬' : '🖼️';
+                const sizeStr = file.size < 1024 * 1024 
+                    ? (file.size / 1024).toFixed(1) + ' KB'
+                    : (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+                
+                return `
+                    <div class="file-item">
+                        <div class="fi-icon ${iconClass}">${iconEmoji}</div>
+                        <div class="fi-info">
+                            <div class="fi-name" title="${file.name}">${file.name}</div>
+                            <div class="fi-meta">${ext.toUpperCase()} · ${sizeStr}</div>
+                        </div>
+                        <button class="fi-remove" onclick="removeFile(${i})" title="移除">✕</button>
+                    </div>
+                `;
+            }).join('');
+
+            btnStart.disabled = allFiles.length === 0;
+        }
+
+        function removeFile(index) {
+            allFiles.splice(index, 1);
+            updateFileList();
+        }
+
+        function clearFiles() {
+            allFiles = [];
+            batch.clear();
+            updateFileList();
+            hideProgress();
+            document.getElementById('statsCard').classList.remove('visible');
+            document.getElementById('downloadButtons').style.display = 'none';
+            document.getElementById('btnStart').disabled = true;
+        }
+
+        // === Options ===
+        function getOptions() {
+            return {
+                fps: parseInt(document.getElementById('optFps').value) || 10,
+                quality: parseInt(document.getElementById('optQuality').value) || 23,
+                width: parseInt(document.getElementById('optWidth').value) || -1,
+                height: parseInt(document.getElementById('optHeight').value) || -1,
+            };
+        }
+
+        // === Start Conversion ===
+        function showProgress() {
+            document.getElementById('progressCard').classList.add('visible');
+            document.getElementById('statsCard').classList.add('visible');
+            document.getElementById('downloadButtons').style.display = 'none';
+        }
+
+        function hideProgress() {
+            document.getElementById('progressCard').classList.remove('visible');
+            document.getElementById('totalProgressBar').style.width = '0%';
+            document.getElementById('totalProgressPct').textContent = '0%';
+            document.getElementById('totalProgressText').textContent = '准备中...';
+            document.getElementById('itemProgressList').innerHTML = '';
+        }
+
+        async function startConversion() {
+            if (allFiles.length === 0) return;
+
+            const options = getOptions();
+            batch.clear();
+            document.getElementById('btnStart').disabled = true;
+            showProgress();
+
+            // Setup batch callbacks
+            batch.onTotalProgress = (completed, total, percent) => {
+                document.getElementById('totalProgressBar').style.width = percent + '%';
+                document.getElementById('totalProgressPct').textContent = percent + '%';
+                document.getElementById('totalProgressText').textContent = 
+                    `总进度: ${completed}/${total}`;
+            };
+
+            batch.onItemProgress = (index, prog) => {
+                updateItemProgressUI();
+            };
+
+            batch.onItemComplete = (index, result) => {
+                updateItemProgressUI();
+                updateStatsUI();
+            };
+
+            batch.onItemError = (index, error) => {
+                updateItemProgressUI();
+                updateStatsUI();
+            };
+
+            batch.onAllComplete = (results) => {
+                document.getElementById('btnStart').disabled = allFiles.length === 0;
+                const bar = document.getElementById('totalProgressBar');
+                
+                if (results.length > 0) {
+                    document.getElementById('totalProgressText').textContent = 
+                        `完成！成功 ${results.length} 个`;
+                    bar.style.width = '100%';
+                    document.getElementById('downloadButtons').style.display = 'flex';
+                } else {
+                    document.getElementById('totalProgressText').textContent = '转换失败，请检查文件格式';
+                    bar.classList.add('error');
+                }
+                updateStatsUI();
+            };
+
+            if (appMode === 'single') {
+                // Single file mode
+                const videoFile = allFiles.find(f => {
+                    const ext = f.name.split('.').pop().toLowerCase();
+                    return ext === 'gif' || ext === 'mp4';
+                });
+                const coverFile = allFiles.find(f => {
+                    const ext = f.name.split('.').pop().toLowerCase();
+                    return ext === 'jpg' || ext === 'jpeg';
+                });
+
+                if (!videoFile) {
+                    alert('请选择一个 GIF 或 MP4 文件');
+                    document.getElementById('btnStart').disabled = false;
+                    return;
+                }
+
+                batch.addItem({
+                    inputFile: videoFile,
+                    coverFile: coverFile || null,
+                    options,
+                });
+            } else {
+                // Batch mode - auto pair files
+                batch.autoPairFiles(allFiles);
+            }
+
+            if (batch.queue.length === 0) {
+                alert('未找到可处理的文件（需要 GIF 或 MP4 文件）');
+                document.getElementById('btnStart').disabled = false;
+                return;
+            }
+
+            updateItemProgressUI();
+            updateStatsUI();
+            await batch.start();
+        }
+
+        function updateItemProgressUI() {
+            const listEl = document.getElementById('itemProgressList');
+            const items = batch.queue.filter(i => i.status !== 'pending');
+
+            if (items.length === 0) {
+                listEl.innerHTML = '';
+                return;
+            }
+
+            listEl.innerHTML = items.map(item => {
+                const statusIcon = {
+                    'processing': '⏳',
+                    'completed': '✅',
+                    'failed': '❌',
+                    'skipped': '⏭️',
+                }[item.status] || '📋';
+
+                const statusColor = {
+                    'processing': '#5dade2',
+                    'completed': '#4CAF50',
+                    'failed': '#e74c3c',
+                    'skipped': '#888',
+                }[item.status] || '#ccc';
+
+                const name = item.inputFile ? item.inputFile.name : item.id;
+                const progressText = item.status === 'processing' 
+                    ? ` ${item.progress}%` 
+                    : item.status === 'failed'
+                    ? ` ${item.error}`
+                    : '';
+
+                return `
+                    <div class="ip-item">
+                        <span>${statusIcon}</span>
+                        <span class="ip-name" title="${name}">${name}</span>
+                        <span class="ip-status" style="color:${statusColor}">${item.status}${progressText}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateStatsUI() {
+            const stats = batch.getStats();
+            document.getElementById('statCompleted').textContent = stats.completed;
+            document.getElementById('statFailed').textContent = stats.failed;
+            document.getElementById('statProcessing').textContent = stats.processing;
+            document.getElementById('statPending').textContent = stats.pending;
+        }
+
+        // === Download ===
+        function downloadAll() {
+            batch.downloadAll();
+        }
+
+        // === Init ===
+        updateFileList();
+        console.log('📱 OPPO 实况照片生成器 已就绪');
+        console.log('   支持: GIF → OPPO Live Photo');
+        console.log('         MP4 → OPPO Live Photo');
+        console.log('         批量队列处理');
+    </script>
+</body>
+</html>

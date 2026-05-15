@@ -1,0 +1,14 @@
+node_modules/
+.DS_Store
+*.exe
+*.obj
+*.o
+*.out
+*.swp
+*~
+dist/
+build/
+.vscode/settings.json
+*.bak
+*.tmp
+Thumbs.db
