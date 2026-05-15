@@ -1,6 +1,9 @@
 /**
  * MP4 Generator - Converts GIF frames to MP4 video
- * Uses FFmpeg.wasm for reliable MP4 encoding in browser
+ * Uses FFmpeg.wasm (v0.12.x) for reliable MP4 encoding in browser
+ *
+ * Note: Requires SharedArrayBuffer support (COOP/COEP headers).
+ * Use a local web server (e.g. `npx serve .`) or open via localhost.
  */
 
 const MP4Generator = {
@@ -8,54 +11,47 @@ const MP4Generator = {
   _ffmpegReady: false,
 
   /**
-   * Load FFmpeg.wasm (lazy loading)
+   * Load FFmpeg.wasm v0.12.x (ESM from jsdelivr CDN)
    */
   async loadFFmpeg() {
     if (this._ffmpegReady) return this._ffmpeg;
-    
-    // Dynamic import of FFmpeg.wasm
-    const { createFFmpeg, fetchFile } = await import(
-      'https://unpkg.com/@ffmpeg/ffmpeg@0.12.6/dist/ffmpeg.min.js'
+
+    const FFmpegModule = await import(
+      'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/+esm'
     );
-    
-    this._ffmpeg = createFFmpeg({
-      log: false,
-      corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+    const { FFmpeg } = FFmpegModule;
+
+    this._ffmpeg = new FFmpeg();
+
+    this._ffmpeg.on('log', ({ message }) => {
+      // Uncomment for debugging: console.log('[ffmpeg]', message);
     });
-    
-    await this._ffmpeg.load();
+
+    this._ffmpeg.on('progress', ({ progress, time }) => {
+      // console.log(`[ffmpeg] Progress: ${Math.round(progress * 100)}%, time: ${time}`);
+    });
+
+    await this._ffmpeg.load({
+      coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js',
+    });
+
     this._ffmpegReady = true;
     return this._ffmpeg;
   },
 
   /**
    * Convert GIF file to MP4 video
-   * @param {Uint8Array|ArrayBuffer} gifData - Raw GIF file data
-   * @param {Object} options - Conversion options
-   * @param {number} options.fps - Output framerate (default: 10)
-   * @param {number} options.width - Output width (default: auto)
-   * @param {number} options.height - Output height (default: auto)
-   * @param {number} options.quality - CRF quality (default: 23, lower=better)
-   * @param {number} options.duration - Force duration in seconds (optional)
-   * @returns {Promise<Uint8Array>} MP4 file data
    */
   async gifToMp4(gifData, options = {}) {
     const ffmpeg = await this.loadFFmpeg();
-    const {
-      fps = 10,
-      width = -1,
-      height = -1,
-      quality = 23,
-      duration = null,
-    } = options;
+    const { fps = 10, width = -1, height = -1, quality = 23, duration = null } = options;
 
-    // Write input GIF to ffmpeg virtual FS
+    const inputData = gifData instanceof ArrayBuffer ? new Uint8Array(gifData) : gifData;
     const inputName = 'input.gif';
     const outputName = 'output.mp4';
-    
-    ffmpeg.FS('writeFile', inputName, await fetchFile(gifData));
 
-    // Build ffmpeg arguments
+    await ffmpeg.writeFile(inputName, inputData);
+
     const args = [
       '-i', inputName,
       '-c:v', 'libx264',
@@ -63,15 +59,12 @@ const MP4Generator = {
       '-crf', String(quality),
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
-      '-an', // No audio
+      '-an',
     ];
 
-    // Apply fps filter if GIF frame delay info is unreliable
     if (fps > 0) {
       args.push('-filter:v', `fps=${fps}`);
     }
-
-    // Apply resolution if specified
     if (width > 0 && height > 0) {
       args.push('-vf', `scale=${width}:${height}`);
     } else if (width > 0) {
@@ -79,49 +72,34 @@ const MP4Generator = {
     } else if (height > 0) {
       args.push('-vf', `scale=-1:${height}`);
     }
-
-    // Force duration if specified
     if (duration !== null) {
       args.push('-t', String(duration));
     }
-
-    // Loop GIF if needed
-    args.push('-ignore_loop', '0');
-
+    if (!args.includes('-ignore_loop')) {
+      args.push('-ignore_loop', '0');
+    }
     args.push(outputName);
 
-    // Run conversion
-    await ffmpeg.run(...args);
+    await ffmpeg.exec(args);
+    const outputData = await ffmpeg.readFile(outputName);
+    await ffmpeg.deleteFile(inputName);
+    await ffmpeg.deleteFile(outputName);
 
-    // Read output
-    const outputData = ffmpeg.FS('readFile', outputName);
-    
-    // Cleanup
-    ffmpeg.FS('unlink', inputName);
-    ffmpeg.FS('unlink', outputName);
-
-    return new Uint8Array(outputData.buffer);
+    return new Uint8Array(outputData);
   },
 
   /**
-   * Convert MP4 video with re-encoding to ensure compatibility
-   * @param {Uint8Array|ArrayBuffer} mp4Data - Raw MP4 file data
-   * @param {Object} options - Conversion options
-   * @returns {Promise<Uint8Array>} Re-encoded MP4
+   * Re-encode MP4 to ensure compatibility
    */
   async normalizeMp4(mp4Data, options = {}) {
     const ffmpeg = await this.loadFFmpeg();
-    const {
-      quality = 23,
-      width = -1,
-      height = -1,
-      fps = 0,
-    } = options;
+    const { quality = 23, width = -1, height = -1, fps = 0 } = options;
 
+    const inputData = mp4Data instanceof ArrayBuffer ? new Uint8Array(mp4Data) : mp4Data;
     const inputName = 'input.mp4';
     const outputName = 'output.mp4';
-    
-    ffmpeg.FS('writeFile', inputName, await fetchFile(mp4Data));
+
+    await ffmpeg.writeFile(inputName, inputData);
 
     const args = [
       '-i', inputName,
@@ -130,199 +108,297 @@ const MP4Generator = {
       '-crf', String(quality),
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
-      '-an', // Strip audio
+      '-an',
     ];
 
-    if (fps > 0) {
-      args.push('-filter:v', `fps=${fps}`);
-    }
-
+    if (fps > 0) args.push('-filter:v', `fps=${fps}`);
     if (width > 0 && height > 0) {
       args.push('-vf', `scale=${width}:${height}`);
+    } else if (width > 0) {
+      args.push('-vf', `scale=${width}:-1`);
+    } else if (height > 0) {
+      args.push('-vf', `scale=-1:${height}`);
     }
-
     args.push(outputName);
 
-    await ffmpeg.run(...args);
+    await ffmpeg.exec(args);
+    const outputData = await ffmpeg.readFile(outputName);
+    await ffmpeg.deleteFile(inputName);
+    await ffmpeg.deleteFile(outputName);
 
-    const outputData = ffmpeg.FS('readFile', outputName);
-    
-    ffmpeg.FS('unlink', inputName);
-    ffmpeg.FS('unlink', outputName);
-
-    return new Uint8Array(outputData.buffer);
+    return new Uint8Array(outputData);
   },
 
   /**
-   * Extract first frame from video as JPEG
-   * @param {Uint8Array|ArrayBuffer} videoData - Raw video file data
-   * @returns {Promise<Uint8Array>} JPEG image data
+   * Extract a single frame as JPEG
    */
-  async extractFirstFrame(videoData) {
+  async extractFrame(inputData, options = {}) {
     const ffmpeg = await this.loadFFmpeg();
-    
-    const inputName = 'input.mp4';
-    const outputName = 'frame.jpg';
-    
-    ffmpeg.FS('writeFile', inputName, await fetchFile(videoData));
+    const { frameIndex = 0, quality = 2 } = options;
 
-    await ffmpeg.run(
+    const data = inputData instanceof ArrayBuffer ? new Uint8Array(inputData) : inputData;
+    const inputName = 'frame_input';
+    const outputName = 'frame_output.jpg';
+
+    await ffmpeg.writeFile(inputName, data);
+
+    const args = [
       '-i', inputName,
+      '-vf', `select=eq(n\\,${frameIndex})`,
       '-vframes', '1',
-      '-q:v', '2',
-      outputName
-    );
+      '-q:v', String(quality),
+      outputName,
+    ];
 
-    const outputData = ffmpeg.FS('readFile', outputName);
-    
-    ffmpeg.FS('unlink', inputName);
-    ffmpeg.FS('unlink', outputName);
+    await ffmpeg.exec(args);
+    const outputData = await ffmpeg.readFile(outputName);
+    await ffmpeg.deleteFile(inputName);
+    await ffmpeg.deleteFile(outputName);
 
-    return new Uint8Array(outputData.buffer);
+    return new Uint8Array(outputData);
   },
 
   /**
-   * Scale JPEG image to target dimensions
-   * @param {Uint8Array|ArrayBuffer} jpegData - Raw JPEG data
-   * @param {number} maxWidth - Maximum width
-   * @param {number} maxHeight - Maximum height
-   * @returns {Promise<Uint8Array>} Scaled JPEG
+   * Convenience: extract first frame from MP4 as JPEG
    */
-  async scaleJpeg(jpegData, maxWidth = 1920, maxHeight = 1920) {
-    const ffmpeg = await this.loadFFmpeg();
-    
-    const inputName = 'input.jpg';
-    const outputName = 'output.jpg';
-    
-    ffmpeg.FS('writeFile', inputName, await fetchFile(jpegData));
-
-    await ffmpeg.run(
-      '-i', inputName,
-      '-vf', `scale='min(${maxWidth},iw)':'min(${maxHeight},ih)':force_original_aspect_ratio=decrease`,
-      '-q:v', '2',
-      outputName
-    );
-
-    const outputData = ffmpeg.FS('readFile', outputName);
-    
-    ffmpeg.FS('unlink', inputName);
-    ffmpeg.FS('unlink', outputName);
-
-    return new Uint8Array(outputData.buffer);
+  async extractFirstFrame(mp4Data, quality = 3) {
+    return this.extractFrame(mp4Data, { frameIndex: 0, quality });
   },
 
   /**
-   * Get GIF metadata (dimensions, frame count, delays)
-   * @param {Uint8Array} gifData - Raw GIF file data
-   * @returns {Object} GIF metadata
+   * Get duration from video via ffmpeg log parsing
+   */
+  async getDuration(inputData) {
+    const ffmpeg = await this.loadFFmpeg();
+    const data = inputData instanceof ArrayBuffer ? new Uint8Array(inputData) : inputData;
+    const inputName = 'dur_input';
+
+    await ffmpeg.writeFile(inputName, data);
+    const logMessages = [];
+
+    const onLog = ({ message }) => { logMessages.push(message); };
+    ffmpeg.on('log', onLog);
+
+    let duration = 0;
+    try {
+      await ffmpeg.exec(['-i', inputName, '-f', 'null', '-']);
+    } catch (e) { /* exit code may be non-zero but logs still have info */ }
+
+    for (const msg of logMessages) {
+      const match = msg.match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/);
+      if (match) {
+        const h = parseInt(match[1], 10);
+        const m = parseInt(match[2], 10);
+        const s = parseInt(match[3], 10);
+        const ms = parseInt(match[4].padEnd(2, '0'), 10) / 100;
+        duration = h * 3600 + m * 60 + s + ms;
+        break;
+      }
+    }
+
+    await ffmpeg.deleteFile(inputName);
+    return duration;
+  },
+
+  /**
+   * Check if ffmpeg.wasm can be loaded
+   */
+  async checkAvailability() {
+    try {
+      if (typeof SharedArrayBuffer === 'undefined') {
+        console.warn(
+          'SharedArrayBuffer is not available. ' +
+          'Opening this page via file:// protocol will not work. ' +
+          'Please use a local web server (e.g. "npx serve .") to serve this page.'
+        );
+        return false;
+      }
+      await this.loadFFmpeg();
+      return true;
+    } catch (err) {
+      console.error('FFmpeg.wasm failed to load:', err.message);
+      return false;
+    }
+  },
+
+  /**
+   * Release FFmpeg resources
+   */
+  async destroy() {
+    if (this._ffmpeg && this._ffmpegReady) {
+      try { await this._ffmpeg.terminate(); } catch (e) { /* ignore */ }
+      this._ffmpeg = null;
+      this._ffmpegReady = false;
+    }
+  },
+
+  /* ========== Pure JS utilities (no FFmpeg required) ========== */
+
+  /**
+   * Parse GIF metadata: dimensions, frame count, total duration
    */
   parseGifMetadata(gifData) {
-    const view = new DataView(gifData.buffer, gifData.byteOffset, gifData.byteLength);
-    
-    // Read Logical Screen Descriptor
-    const width = view.getUint16(6, true);  // bytes 6-7
-    const height = view.getUint16(8, true); // bytes 8-9
-    
-    // Read Global Color Table flag
-    const packed = view.getUint8(10);
-    const hasGlobalColorTable = (packed & 0x80) !== 0;
-    const gctSize = hasGlobalColorTable ? 3 * (1 << ((packed & 0x07) + 1)) : 0;
-    
-    // Count frames
-    let frameCount = 0;
-    let totalDuration = 0;
-    let pos = 13 + gctSize; // After LSD + GCT
+    const data = new Uint8Array(gifData);
+    if (data.length < 13) throw new Error('Not a valid GIF file');
 
-    while (pos < gifData.length) {
-      const blockType = gifData[pos];
-      
-      if (blockType === 0x21) { // Extension
-        const extType = gifData[pos + 1];
-        if (extType === 0xF9) { // Graphics Control Extension
-          const delay = view.getUint16(pos + 4, true);
-          totalDuration += delay * 10; // delay in centiseconds → ms
-          pos += 8; // GCE is 8 bytes
-        } else if (extType === 0xFF) { // Application Extension
-          const blockSize = gifData[pos + 2];
-          pos += 3 + blockSize;
-          while (pos < gifData.length && gifData[pos] !== 0x00) {
-            pos += 1 + gifData[pos];
-          }
-          pos++; // skip 0x00 terminator
+    const header = String.fromCharCode(data[0], data[1], data[2]);
+    if (header !== 'GIF') throw new Error('Not a GIF file');
+
+    const width  = data[6]  | (data[7] << 8);
+    const height = data[8]  | (data[9] << 8);
+    const packed = data[10];
+    const hasGCT = (packed & 0x80) !== 0;
+    const gctSize = 2 << (packed & 0x07);
+
+    let offset = 13;
+    if (hasGCT) offset += gctSize * 3;
+
+    let frameCount = 0;
+    let totalDelayCs = 0;
+    let imgW = width, imgH = height;
+
+    while (offset < data.length) {
+      const bt = data[offset];
+      if (bt === 0x21) {
+        if (data[offset + 1] === 0xF9) {
+          totalDelayCs += data[offset + 4] | (data[offset + 5] << 8);
+          offset += 8;
         } else {
-          pos += 2;
-          while (pos < gifData.length && gifData[pos] !== 0x00) {
-            pos += 1 + gifData[pos];
+          offset += 2;
+          while (offset < data.length && data[offset] !== 0x00) {
+            offset += 1 + data[offset];
           }
-          pos++;
+          if (offset < data.length) offset++;
         }
-      } else if (blockType === 0x2C) { // Image Descriptor
+      } else if (bt === 0x2C) {
         frameCount++;
-        pos += 10; // Image descriptor header
-        // Check for local color table
-        const localPacked = gifData[pos - 1];
-        const hasLCT = (localPacked & 0x80) !== 0;
-        if (hasLCT) {
-          const lctSize = 3 * (1 << ((localPacked & 0x07) + 1));
-          pos += lctSize;
+        const l = data[offset + 1] | (data[offset + 2] << 8);
+        const t = data[offset + 3] | (data[offset + 4] << 8);
+        imgW = Math.max(imgW, (data[offset + 5] | (data[offset + 6] << 8)) + l);
+        imgH = Math.max(imgH, (data[offset + 7] | (data[offset + 8] << 8)) + t);
+        const lPacked = data[offset + 9];
+        offset += 10;
+        if (lPacked & 0x80) offset += (2 << (lPacked & 0x07)) * 3;
+        offset++; // LZW minimum code size
+        while (offset < data.length && data[offset] !== 0x00) {
+          offset += 1 + data[offset];
         }
-        // Skip LZW data
-        pos++; // LZW minimum code size
-        while (pos < gifData.length && gifData[pos] !== 0x00) {
-          pos += 1 + gifData[pos];
-        }
-        pos++; // skip block terminator
-      } else if (blockType === 0x3B) { // Trailer
+        if (offset < data.length) offset++;
+      } else if (bt === 0x3B) {
         break;
       } else {
-        pos++;
+        offset++;
       }
     }
 
     return {
-      width,
-      height,
-      frameCount,
-      totalDurationMs: totalDuration,
-      totalDurationSec: totalDuration / 1000,
+      width, height,
+      imgWidth: imgW, imgHeight: imgH,
+      frameCount: Math.max(frameCount, 1),
+      totalDelayCs,
+      totalDurationSec: Math.max(totalDelayCs / 100, 0.1),
     };
   },
 
   /**
-   * Get video metadata from MP4 file using ffmpeg
-   * @param {Uint8Array|ArrayBuffer} mp4Data - Raw MP4 data
-   * @returns {Promise<Object>} Video metadata
+   * Parse MP4 metadata (width, height, duration) — Pure JS
    */
-  async getVideoMetadata(mp4Data) {
-    // Simple approach: use ffprobe or parse MP4 header manually
-    // For now, return basic info from mp4 box structure
-    const data = mp4Data instanceof Uint8Array ? mp4Data : new Uint8Array(mp4Data);
-    
-    let width = 0, height = 0;
-    // Look for tkhd box to get dimensions
-    const tkhdIdx = this._findFourCC(data, 'tkhd');
-    if (tkhdIdx >= 0) {
-      const view = new DataView(data.buffer, data.byteOffset + tkhdIdx + 88, 8);
-      width = view.getUint32(0, false) >> 16;
-      height = view.getUint32(4, false) >> 16;
-    }
+  getVideoMetadata(mp4Data) {
+    const data = new Uint8Array(mp4Data);
+    if (data.length < 8) return { width: 0, height: 0, duration: 0 };
 
-    return { width, height };
+    let width = 0, height = 0, duration = 0, timescale = 0;
+
+    const read32 = (off) =>
+      (data[off] << 24) | (data[off + 1] << 16) | (data[off + 2] << 8) | data[off + 3];
+
+    const read16 = (off) => (data[off] << 8) | data[off + 1];
+
+    const findBox = (start, end, boxType) => {
+      let off = start;
+      while (off < end - 8) {
+        const sz = read32(off);
+        if (sz < 8 || off + sz > end) break;
+        const tp = String.fromCharCode(data[off + 4], data[off + 5], data[off + 6], data[off + 7]);
+        if (tp === boxType) return { offset: off, size: sz };
+        off += sz;
+      }
+      return null;
+    };
+
+    const moov = findBox(0, Math.min(data.length, 131072), 'moov');
+    if (!moov) return { width: 0, height: 0, duration: 0 };
+
+    const moovEnd = moov.offset + moov.size;
+
+    const walk = (start, end) => {
+      let o = start;
+      while (o < end - 8) {
+        const sz = read32(o);
+        if (sz < 8 || o + sz > end) break;
+        const tp = String.fromCharCode(data[o + 4], data[o + 5], data[o + 6], data[o + 7]);
+
+        if (tp === 'mdhd' && timescale === 0) {
+          if (data[o + 8] === 0) {
+            timescale = read32(o + 20);
+            duration  = read32(o + 24);
+          }
+        }
+
+        if (tp === 'stsd' && width === 0) {
+          const count = read32(o + 12);
+          if (count > 0) {
+            // sample entry starts at o+16
+            width  = read16(o + 16 + 32);
+            height = read16(o + 16 + 34);
+          }
+        }
+
+        walk(o + 8, o + sz);
+        o += sz;
+      }
+    };
+
+    walk(moov.offset + 8, moovEnd);
+
+    return {
+      width, height,
+      duration: timescale > 0 ? duration / timescale : 0,
+      timescale,
+    };
   },
 
-  _findFourCC(data, fourcc) {
-    const target = new TextEncoder().encode(fourcc);
-    outer: for (let i = 0; i <= data.length - 4; i++) {
-      for (let j = 0; j < 4; j++) {
-        if (data[i + j] !== target[j]) continue outer;
-      }
-      return i;
+  /**
+   * Scale JPEG to a reasonable cover size (browser Canvas API)
+   */
+  async scaleJpeg(jpegData, maxW = 1280, maxH = 1280) {
+    const blob = new Blob([jpegData], { type: 'image/jpeg' });
+    const bitmap = await createImageBitmap(blob);
+
+    let w = bitmap.width, h = bitmap.height;
+    if (w <= maxW && h <= maxH) {
+      bitmap.close();
+      return jpegData;
     }
-    return -1;
-  }
+
+    const ratio = Math.min(maxW / w, maxH / h);
+    w = Math.round(w * ratio);
+    h = Math.round(h * ratio);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+
+    const resizedBlob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
+    const buf = await resizedBlob.arrayBuffer();
+    return new Uint8Array(buf);
+  },
 };
 
-// Export
+// Export for ES module / global usage
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = MP4Generator;
 }
